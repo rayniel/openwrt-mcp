@@ -27,7 +27,9 @@ export function buildServer(ctx: ToolContext, tools: ToolDef[] = allTools): McpS
       shape.confirm = z
         .boolean()
         .optional()
-        .describe("Set true to execute. Omit/false to get a safe preview first.");
+        .describe(
+          "Set true to request execution; omit/false for a preview. This parameter is not proof of human approval or SSH host trust.",
+        );
     }
 
     server.tool(def.name, def.description, shape, async (args: Record<string, unknown>) => {

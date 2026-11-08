@@ -10,7 +10,22 @@ const router: RouterConfig = {
 function ctxWith(execImpl: (r: RouterConfig, c: string) => Promise<CommandResult>): ToolContext {
   return { ssh: { exec: vi.fn(execImpl) }, resolveRouter: () => router };
 }
-const ok = (stdout: string): CommandResult => ({ stdout, stderr: "", code: 0 });
+const result = (
+  stdout: string,
+  stderr = "",
+  code: number | null = 0,
+  status: CommandResult["status"] = "completed",
+): CommandResult => ({
+  stdout, stderr, code, signal: null, durationMs: 1, status,
+  dispatchState: status === "completed" ? "dispatched" : "not_dispatched",
+  stdoutBytes: Buffer.byteLength(stdout),
+  stderrBytes: Buffer.byteLength(stderr),
+  stdoutTruncated: false,
+  stderrTruncated: false,
+  outputPartial: false,
+  archiveStatus: "not_configured",
+});
+const ok = (stdout: string): CommandResult => result(stdout);
 
 const readTool: ToolDef = {
   name: "r", description: "", schema: {} as any,
@@ -32,7 +47,10 @@ describe("runTool", () => {
   it("read tool executes and parses immediately", async () => {
     const ctx = ctxWith(async () => ok("hi"));
     const res = await runTool(readTool, {}, ctx);
-    expect(res).toEqual({ ok: true, data: { out: "hi" } });
+    expect(res).toMatchObject({ ok: true, data: { out: "hi" } });
+    expect(res.execution?.steps[0]).toMatchObject({ command: "echo hi", code: 0 });
+    expect(res.execution?.steps[0]).not.toHaveProperty("stdout");
+    expect(res.execution?.steps[0]).not.toHaveProperty("stderr");
   });
 
   it("unconfirmed mutate returns a preview and does NOT run build commands", async () => {
@@ -50,7 +68,7 @@ describe("runTool", () => {
     const exec = vi.fn(async () => ok(""));
     const ctx: ToolContext = { ssh: { exec }, resolveRouter: () => router };
     const res = await runTool(mutateTool, { confirm: true }, ctx);
-    expect(res).toEqual({ ok: true, data: { done: true } });
+    expect(res).toMatchObject({ ok: true, data: { done: true } });
     expect(exec).toHaveBeenCalledWith(router, "uci set foo=bar", expect.anything());
   });
 
@@ -63,18 +81,47 @@ describe("runTool", () => {
   });
 
   it("non-zero exit code becomes a structured error", async () => {
-    const ctx = ctxWith(async () => ({ stdout: "", stderr: "boom", code: 1 }));
+    const ctx = ctxWith(async () => result("useful stdout", "boom", 1));
     const res = await runTool(readTool, {}, ctx);
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/exit code 1/);
-    expect(res.error).toMatch(/boom/);
+    expect(res).not.toHaveProperty("data");
+    expect(res.execution?.steps[0]).toMatchObject({
+      stdout: "useful stdout",
+      stderr: "boom",
+      code: 1,
+      status: "completed",
+    });
   });
 
-  it("thrown ssh error becomes a structured error", async () => {
-    const ctx = ctxWith(async () => { throw new Error("ECONNREFUSED"); });
+  it("connection failure becomes a structured result", async () => {
+    const ctx = ctxWith(async () => result("", "", null, "connection_error"));
     const res = await runTool(readTool, {}, ctx);
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/ECONNREFUSED/);
+    expect(res.error).toMatch(/connection error/);
+    expect(res).not.toHaveProperty("data");
+    expect(res.execution?.steps[0].code).toBeNull();
+  });
+
+  it("stops a command sequence and reports later commands as not executed", async () => {
+    const multi: ToolDef = {
+      ...readTool,
+      build: () => ({ commands: ["first", "stop here", "not sent"] }),
+    };
+    const exec = vi.fn()
+      .mockResolvedValueOnce(result("first output"))
+      .mockResolvedValueOnce(result("failure output", "bad", 7));
+    const res = await runTool(multi, {}, { ssh: { exec }, resolveRouter: () => router });
+    expect(exec).toHaveBeenCalledTimes(2);
+    expect(res).not.toHaveProperty("data");
+    expect(res.execution?.steps).toHaveLength(3);
+    expect(res.execution?.steps[0]).toMatchObject({ stdout: "first output", code: 0 });
+    expect(res.execution?.steps[1]).toMatchObject({ stdout: "failure output", stderr: "bad", code: 7 });
+    expect(res.execution?.steps[2]).toMatchObject({
+      command: "not sent",
+      status: "not_executed",
+      dispatchState: "not_dispatched",
+    });
   });
 
   it("risky preview includes the warning from build()", async () => {

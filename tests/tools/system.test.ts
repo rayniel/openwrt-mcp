@@ -7,7 +7,13 @@ const router: RouterConfig = {
   name: "home", host: "h", port: 22, username: "root",
   auth: { type: "password", password: "x" }, readonly: false, default: true,
 };
-const ok = (stdout: string): CommandResult => ({ stdout, stderr: "", code: 0 });
+const ok = (stdout: string): CommandResult => ({
+  stdout, stderr: "", code: 0, signal: null, durationMs: 1,
+  status: "completed", dispatchState: "dispatched",
+  stdoutBytes: Buffer.byteLength(stdout), stderrBytes: 0,
+  stdoutTruncated: false, stderrTruncated: false, outputPartial: false,
+  archiveStatus: "not_configured",
+});
 function ctx(map: Record<string, string>): ToolContext {
   return {
     ssh: { exec: vi.fn(async (_r, cmd: string) => ok(map[cmd] ?? "")) },

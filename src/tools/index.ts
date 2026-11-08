@@ -8,8 +8,9 @@ import { packageTools } from "./packages.js";
 import { serviceTools } from "./services.js";
 import { logTools } from "./logs.js";
 import { shellTools } from "./shell.js";
+import { outputTools } from "./output.js";
 
 export const allTools: ToolDef[] = [
   ...systemTools, ...networkTools, ...uciTools, ...wifiTools,
-  ...firewallTools, ...packageTools, ...serviceTools, ...logTools, ...shellTools,
+  ...firewallTools, ...packageTools, ...serviceTools, ...logTools, ...shellTools, ...outputTools,
 ];
